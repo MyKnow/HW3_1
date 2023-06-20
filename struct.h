@@ -7,14 +7,10 @@ typedef enum {
     AND = 0x24,
     JR = 0x08,
     JALR = 0x09,
-    NOR = 0x27,
     OR = 0x25,
     SLT = 0x2a,
-    SLTU = 0x2b,
     SLL = 0x00,
-    SRL = 0x02,
-    SUB = 0x22,
-    SUBU = 0x23
+    SUB = 0x22
 }enum_R;
 
 // I
@@ -24,17 +20,9 @@ typedef enum {
     ANDI = 0x0c,
     BEQ = 0x04,
     BNE = 0x05,
-    LBU = 0x24,
-    LHU = 0x25,
-    LL = 0x30,
-    LUI = 0x0f,
     LW = 0x23,
-    ORI = 0x0d,
     SLTI = 0x0a,
     SLTIU = 0x0b,
-    SB = 0x28,
-    SC = 0x38,
-    SH = 0x29,
     SW = 0x2b
 } enum_I;
 
@@ -53,8 +41,8 @@ typedef struct instruction {
     u_int8_t rd : 5;            // Inst 15-11
     u_int8_t shamt : 5;         // Inst 10-06
     u_int8_t func : 6;          // Inst 05-00
-    u_int32_t addr : 26;     // Inst 25-00
-    u_int16_t imm : 16;   // Inst 15-00
+    u_int32_t addr : 26;        // Inst 25-00
+    u_int32_t imm;			    // Inst 15-00
 } Instruction;
 
 typedef struct {
@@ -81,7 +69,6 @@ typedef struct ifid{
 typedef struct idex{
 	Instruction inst;
     u_int32_t PC;
-	u_int32_t BranchAddr;
     u_int32_t immediate;
 	Control ctr;
 	u_int32_t data1,data2;
@@ -92,7 +79,6 @@ typedef struct idex{
 typedef struct exmem{
 	Instruction inst;
     u_int32_t PC;
-	u_int32_t JumpAddr, BranchAddr;
     u_int32_t  immediate;
 	Control ctr;
 	u_int32_t data1, data2;
@@ -103,7 +89,6 @@ typedef struct exmem{
 typedef struct memwb{
 	Instruction inst;
     u_int32_t PC;
-	u_int32_t JumpAddr, BranchAddr;
     u_int32_t  immediate;
 	Control ctr;
 	u_int32_t data1, data2;
@@ -132,7 +117,7 @@ u_int32_t R[32];
 
 // PC 및 Cycle 카운트 변수
 u_int32_t PC = 0;
-u_int32_t cycle=0;
+u_int32_t cycle = 1;
 
 // 명령어 갯수, 상태 변화 카운트 변수
 u_int32_t inst_count = 0;
@@ -148,15 +133,6 @@ IFID ifid[2];
 IDEX idex[2];
 EXMEM exmem[2];
 MEMWB memwb[2];
-
-// Branch History Table (BHT) Entry
-typedef struct {
-    int prediction; // Prediction for the branch
-} BHTEntry;
-
-// Branch Target Buffer (BTB)
-u_int8_t BTB[iMemSize];
-
 
 // 이진 파일에서 데이터를 한 줄씩(32비트) 읽은 다음 메모리 배열에 저장하는 함수
 void readMipsBinary(FILE *file);
@@ -178,8 +154,8 @@ void processControl(u_int32_t opcode);
 u_int32_t signExtend(u_int16_t immediate);
 
 // 각 Stage별 함수
-u_int8_t IF();
-u_int8_t ID();
-u_int8_t EX();
-u_int8_t MEM();
-u_int8_t WB();
+void IF();
+void ID();
+void EX();
+void MEM();
+void WB();

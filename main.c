@@ -5,7 +5,12 @@
 int main(){
     FILE *file;
 
-    file = fopen("input.bin", "r");
+	printf("\n !! 1을 입력하시면 input1의 이진 파일을, 그 외 나머지를 입력하시면 input2의 이진 파일을 수행합니다 : ");
+	int input;
+	scanf("%d", &input);
+	if (input == 1) file = fopen("input_1.bin", "r");
+	else file = fopen("input_2.bin", "r");
+
     if (file == NULL){
         printf("파일을 열 수 없습니다.\n");
         return 0;
@@ -350,7 +355,7 @@ void BranchTaken() {
 	branch_count++;
 }
 
-u_int8_t IF(){
+void IF(){
 	// instruction을 다루기 쉽게 Memory[PC/4]로부터 바이너리 통째로 가져옴
 	ifid[0].inst.instruction = iMem[(PC)/4];
 	printf("\t[IF]\n\t\t[IM] PC: 0x%0X -> 0x%08X\n", PC, ifid[0].inst.instruction);
@@ -360,18 +365,41 @@ u_int8_t IF(){
 
 	// Update PC
 	PC = PC + 4;
-
-	return 0;
 }
 
-u_int8_t ID(){
+void ID(){
 	printf("\t[ID]\n");
 	// Instruction을 유기적으로 구분하는 함수
 	parseInstruction();
 
 	// 16비트짜리 offset으로 변환
 	idex[0].immediate = signExtend(ifid[1].inst.instruction);
+	
+	// Control Hazard를 위한 변수, Adder, Comparator
+	u_int32_t opcode = idex[0].inst.opcode;
+	u_int32_t offset = (idex[0].immediate << 2) + (idex[0].PC + 4);
+	u_int8_t branch = (R[idex[0].inst.rs] == R[idex[0].inst.rt]);
+	u_int8_t flag = 0;
 
+	/*
+		NOP 명령어가 이미 있기 때문에 에러 발생, 따라서 Load-Use Hazard는 비활성화
+
+	// Load-Use Hazard
+	if (idex[0].ctr.MemRead == 1) {
+		// 바로 앞 명령어가 load이면서 앞 명령어의 Rd(I type은 Rd가 Rt)가 현재 명령어의 source와 똑같다면 Hazard 발생
+		if ((idex[0].inst.rt == ifid[0].inst.rs) || (idex[0].inst.rt == ifid[0].inst.rt)) {
+			int a;
+			scanf("%d", &a);
+			// Control값을 0으로 만들어 버린다. (다음 명령어 nop)
+			memset(&idex[1].ctr, 0, sizeof(idex[1].ctr));
+
+			// PC와 IFID 레지스터의 값을 유보한다.
+			ifid[1] = ifid[0];
+			PC -= 4;
+		}
+	}
+	*/
+	
 	// IFID 레지스터의 출력값을 IDEX 레지스터의 입력으로 초기화
 	idex[0].inst.instruction = ifid[1].inst.instruction;
 	idex[0].PC = ifid[1].PC;
@@ -379,10 +407,25 @@ u_int8_t ID(){
 	// OPCODE에 따라 Control값 반환
 	processControl(idex[0].inst.opcode);
 
-	return 0;
+	// OPCODE가 BEQ 또는 BNE이면서 Branch가 Taken일 때
+	if (opcode == BEQ) {
+		if (branch) {
+			flag = 1;
+		}
+	} else if (opcode == BNE) {
+		if (!branch) {
+			flag = 1;
+		}
+	}
+
+	// PC를 branch offset으로 업데이트 해준다.
+	if (flag == 1) {
+		printf("\tBEQBNE! : 0x%x(%d)\n", offset, offset);
+		ifid[1].PC = offset;
+	}
 }
 
-u_int8_t EX(){
+void EX(){
 	printf("\t[EX]\n");
 
 	// rs, rt 레지스터 번호로 각각 레지스터 데이터 추출
@@ -438,11 +481,9 @@ u_int8_t EX(){
 	exmem[0].ctr = idex[1].ctr;
 	exmem[0].data1 = idex[1].data1;
 	exmem[0].data2 = idex[1].data2;
-
-	return 0;
 }
 
-u_int8_t MEM(){
+void MEM(){
 	printf("\t[MEM]\n\t\t");
 
 	// MemRead가 true일 경우 Load Word, 반대일 경우 Store Word
@@ -466,11 +507,9 @@ u_int8_t MEM(){
 	memwb[0].ALUResult = exmem[1].ALUResult;
 	memwb[0].WriteReg = exmem[1].WriteReg;
 	memwb[0].ReadData = exmem[1].ReadData;
-
-	return 0;
 }
 
-u_int8_t WB(){
+void WB(){
 	printf("\t[WB]\n");
 
 	if(memwb[0].ctr.RegWrite ==1 ){
@@ -488,5 +527,4 @@ u_int8_t WB(){
 		}
 		reg_count++;
 	}
-	return 0;
 }
