@@ -81,8 +81,8 @@ typedef struct ifid{
 typedef struct idex{
 	Instruction inst;
     u_int32_t PC;
-	u_int32_t JumpAddr,BranchAddr;
-    u_int32_t ZeroExtImm,SignExtImm;
+	u_int32_t BranchAddr;
+    u_int32_t immediate;
 	Control ctr;
 	u_int32_t data1,data2;
 	u_int32_t temp;
@@ -93,7 +93,7 @@ typedef struct exmem{
 	Instruction inst;
     u_int32_t PC;
 	u_int32_t JumpAddr, BranchAddr;
-    u_int32_t ZeroExtImm, SignExtImm;
+    u_int32_t  immediate;
 	Control ctr;
 	u_int32_t data1, data2;
     u_int32_t temp;
@@ -104,7 +104,7 @@ typedef struct memwb{
 	Instruction inst;
     u_int32_t PC;
 	u_int32_t JumpAddr, BranchAddr;
-    u_int32_t ZeroExtImm, SignExtImm;
+    u_int32_t  immediate;
 	Control ctr;
 	u_int32_t data1, data2;
     u_int32_t temp;
@@ -148,3 +148,30 @@ IFID ifid[2];
 IDEX idex[2];
 EXMEM exmem[2];
 MEMWB memwb[2];
+
+
+// 이진 파일에서 데이터를 한 줄씩(32비트) 읽은 다음 메모리 배열에 저장하는 함수
+void readMipsBinary(FILE *file);
+
+// R, I 타입의 명령어를 분석하여 연산하는 함수
+void processALU();
+
+// BEQ나 BNE와 같은 분기 명령어를 처리하는 함수
+void BranchPrediction(u_int32_t opcode, u_int32_t data1, u_int32_t data2);
+void BranchTaken();
+
+// Binary를 명령어로 분할하여 저장하는 함수
+void parseInstruction();
+
+// OPCODE에 따라 Control값을 구분하는 함수
+void processControl(u_int32_t opcode);
+
+// 16비트 immdidate를 32비트 Unsigned int로 형변환하는 함수
+u_int32_t signExtend(u_int16_t immediate);
+
+// 각 Stage별 함수
+u_int8_t IF();
+u_int8_t ID();
+u_int8_t EX();
+u_int8_t MEM();
+u_int8_t WB();

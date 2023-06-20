@@ -2,41 +2,6 @@
 #include <string.h>
 #include "struct.h"
 
-// 이진 파일에서 데이터를 한 줄씩(32비트) 읽은 다음 메모리 배열에 저장하는 함수
-void readMipsBinary(FILE *file);
-
-// 명령어의 타입마다 ALU를 분할해서 함수로 정의함
-void ALU_R(u_int32_t func, u_int32_t data1, u_int32_t data2);
-void ALU_I(u_int32_t opcode, u_int32_t data1, u_int32_t data2);
-void processjAddress(u_int32_t opcode);
-u_int32_t pcJump();
-
-
-// BEQ나 BNE와 같은 분기 명령어를 처리하는 함수
-void BranchTaken();
-void BranchPrediction(u_int32_t opcode, u_int32_t data1, u_int32_t data2);
-u_int32_t pcBranch();
-
-// 각 파이프라인 레지스터의 쓰기값을 이전 읽기값으로 초기화
-void Update();
-
-// Binary를 명령어로 분할하여 저장하는 함수
-void parseInstruction();
-
-// OPCODE에 따라 Control값을 구분하는 함수
-// 주요 명령어만 정의하였으나 명령어에 따라서 작동 가능
-void processControl(u_int32_t opcode);
-
-// 16비트 immdidate를 32비트 Unsigned int로 형변환하는 함수
-u_int32_t signExtend(u_int16_t immediate);
-
-// 각 Stage별 함수
-u_int8_t IF();
-u_int8_t ID();
-u_int8_t EX();
-u_int8_t MEM();
-u_int8_t WB();
-
 int main(){
     FILE *file;
 
@@ -57,18 +22,16 @@ int main(){
 	R[$ra] = 0xFFFFFFFF; 
 
 	while(1){
+		printf("cycle: %d\n",cycle);
 
-		// 반환값이 1이 아닌 경우 즉시 종료
-		ret = IF();	
-		if(ret != 1) break;
-		ret = ID();
-		if(ret != 1) break;
-		ret = EX();	
-		if(ret != 1) break;	
-		ret = MEM();
-		if(ret != 1) break;
-		ret = WB();
-		if(ret != 1) break;
+		IF();
+		ID();
+		EX();	
+		MEM();
+		WB();
+
+		// PC가 0xFFFFFFFF 라면 바로 종료
+		if(PC == 0xFFFFFFFF) break;
 
 		// 각 레지스터의 출력값을 입력값으로 초기화 (다음 명령어 실행을 위함)
 		ifid[1] = ifid[0];
@@ -76,7 +39,6 @@ int main(){
 		exmem[1] = exmem[0];
 		memwb[1] = memwb[0];
 		
-		printf("cycle: %d\n",cycle);
 		cycle++;
 	}
 
@@ -115,10 +77,10 @@ void readMipsBinary(FILE *file){
 }
 
 void parseInstruction() {
-
 	// opcode 먼저 계산
 	u_int32_t binary = ifid[1].inst.instruction;
     idex[0].inst.opcode = (binary >> 26) & 0x3F;
+
     // R 명령어 분리
     if (idex[0].inst.opcode == 0) {
 		R_count++;
@@ -180,7 +142,16 @@ void parseInstruction() {
 }
 
 void processControl(u_int32_t opcode){
-	u_int32_t ret = 1;
+	// opcode가 Jump 계열인 경우 
+	if(opcode == J || opcode == JAL){
+		// JAL이면 PC값으로 $ra 업데이트
+		if (opcode == JAL) R[$ra] = idex[0].PC+8;
+
+		// PC의 상위 4비트(256MB 범위)와 address의 4배수를 더한 값(offset)을 PC로 함
+		PC = (ifid[1].PC & 0xF0000000) | (idex[0].inst.addr << 2);
+		exe_count++;
+		jump_count++;
+	}
 
 	if(opcode == 0x0){
         idex[0].ctr.RegDst = 1;
@@ -235,180 +206,112 @@ u_int32_t signExtend(u_int16_t immediate) {
     return extend;
 }
 
-u_int32_t pcJump(){
-	idex[0].JumpAddr = (ifid[1].PC & 0xF0000000) | (idex[0].inst.addr <<2);
-	u_int32_t j = idex[0].JumpAddr;
-	return j;
-}
+void processALU() {
+	u_int8_t opcode = idex[1].inst.opcode;
+	u_int8_t func = idex[1].inst.func;
+	u_int32_t data1 = idex[1].data1;
+	u_int32_t data2 = idex[1].data2;
 
-u_int32_t pcBranch(){
-	idex[1].BranchAddr = idex[1].SignExtImm << 2;
-	u_int32_t b = idex[1].BranchAddr;
-	return b;
-}
+	// R 타입 명령어
+	if (idex[1].ctr.RegDst == 1) {
+		switch(func){
+			case ADD:
+				exmem[0].ALUResult = data1 + data2;
+				exe_count++;
+				break;
 
-void processjAddress(u_int32_t opcode){
-    if(opcode == J){
-		PC = pcJump();
-		exe_count++;
-		jump_count++;
-	} else if (opcode == JAL){	
-		R[$ra] = idex[0].PC+8;
-		PC = pcJump();
-		exe_count++;
-		jump_count++;
+			case ADDU:
+				exmem[0].ALUResult = data1 + data2;
+				exe_count++;
+				break;
+
+			case AND: 
+				exmem[0].ALUResult = data1 & data2;
+				exe_count++;
+				break;
+
+			case JR:
+				PC=data1;
+				memset(&ifid[0], 0, sizeof(IFID));
+				memset(&idex[0], 0, sizeof(IDEX));
+				break;
+
+			case JALR:
+				PC=data1;
+				memset(&ifid[0], 0, sizeof(IFID));
+				memset(&idex[0], 0, sizeof(IDEX));
+				break;
+
+			case OR:
+				exmem[0].ALUResult = (data1|data2);
+				exe_count++;
+				break;
+
+			case SLT:
+				exmem[0].ALUResult = ((data1<data2) ? 1:0);
+				exe_count++;
+				break;
+
+			case SLL:
+				exmem[0].ALUResult = data2 << idex[1].inst.shamt;	
+				exe_count++;
+				break;
+
+			case SUB:
+				exmem[0].ALUResult = data1 - data2;
+				exe_count++;
+				break;
+
+			default:
+				break;
+			}
+
 	}
-}
+    // I 타입 명령어
+	else if (idex[1].ctr.ALUSrc==1) {
+		u_int32_t temp;
+		
+		switch (opcode) {
+			case ADDI:
+			case ADDIU:
+				exmem[0].ALUResult = data1 + idex[1].immediate;
+				exe_count++;
+				break;
 
-void ALU_R(u_int32_t func,u_int32_t data1, u_int32_t data2){
-    switch(idex[1].inst.func){
-	case ADD:
-		exmem[0].ALUResult = data1 + data2;
-		exe_count++;
-		break;
+			case ANDI:
+				exmem[0].ALUResult = data1 & idex[1].immediate;
+				exe_count++;
+				break;
 
-	case ADDU:
-		exmem[0].ALUResult = data1 + data2;
-		exe_count++;
-		break;
+			case LW:
+				exmem[0].temp = data1 + idex[1].immediate;
+				exe_count++;
+				break;
 
-    case AND: 
-		exmem[0].ALUResult = data1 & data2;
-		exe_count++;
-		break;
+			case SLTI:
+				exmem[0].ALUResult = (data1 < idex[1].immediate) ? 1 : 0;
+				exe_count++;
+				break;
 
-	case JR:
-		PC=data1;
-		memset(&ifid[0], 0, sizeof(IFID));
-		memset(&idex[0], 0, sizeof(IDEX));
-		break;
+			case SLTIU:
+				exmem[0].ALUResult = (data1 < (u_int32_t)idex[1].immediate) ? 1 : 0;
+				exe_count++;
+				break;
 
-	case JALR:
-		PC=data1;
-		memset(&ifid[0], 0, sizeof(IFID));
-		memset(&idex[0], 0, sizeof(IDEX));
-		break;
+			case SW:
+				exmem[0].ALUResult = data2;
+				exmem[0].temp = data1 + idex[1].immediate;
+				exe_count++;
+				break;
 
-    case NOR:
-		exmem[0].ALUResult = !(data1|data2);
-		exe_count++;
-		break;
-
-	case OR:
-		exmem[0].ALUResult = (data1|data2);
-		exe_count++;
-		break;
-
-	case SLT:
-		exmem[0].ALUResult = ((data1<data2) ? 1:0);
-		exe_count++;
-		break;
-
-	case SLTU:
-		exmem[0].ALUResult = (((u_int32_t)data1<(u_int32_t)data2) ? 1:0);
-		exe_count++;
-		break;
-
-	case SLL:
-		exmem[0].ALUResult = data2 << idex[1].inst.shamt;	
-		exe_count++;
-		break;
-
-    case SRL:
-		exmem[0].ALUResult = data2 >> idex[1].inst.shamt;
-		exe_count++;
-		break;
-
-	case SUB:
-		exmem[0].ALUResult = data1 - data2;
-		exe_count++;
-		break;
-
-    case SUBU:
-		exmem[0].ALUResult = (u_int32_t)data1 - (u_int32_t)data2;
-		exe_count++;
-		break;
-
-	default:
-		break;
+			default:
+				break;
+		}
 	}
-}
-
-void ALU_I(u_int32_t opcode, u_int32_t data1, u_int32_t data2) {
-    u_int32_t temp;
-    
-    switch (opcode) {
-        case ADDI:
-        case ADDIU:
-            exmem[0].ALUResult = data1 + idex[1].SignExtImm;
-            exe_count++;
-            break;
-
-        case ANDI:
-            exmem[0].ALUResult = data1 & idex[1].ZeroExtImm;
-            exe_count++;
-            break;
-
-        case LBU:
-        case LHU:
-            exmem[0].ALUResult = (Memory[(idex[1].inst.rs + idex[1].SignExtImm) / 4]) & 0x000000FF;
-            exe_count++;
-            break;
-
-        case LL:
-            exmem[0].inst.rt = Memory[(idex[1].inst.rs + idex[1].SignExtImm) / 4];
-            exe_count++;
-            break;
-
-        case LUI:
-            exmem[0].ALUResult = idex[1].inst.imm << 16;
-            exe_count++;
-            break;
-
-        case LW:
-            exmem[0].temp = data1 + idex[1].SignExtImm;
-            exe_count++;
-            break;
-
-        case ORI:
-            exmem[0].ALUResult = data1 | idex[1].ZeroExtImm;
-            exe_count++;
-            break;
-
-        case SLTI:
-            exmem[0].ALUResult = (data1 < idex[1].SignExtImm) ? 1 : 0;
-            exe_count++;
-            break;
-
-        case SLTIU:
-            exmem[0].ALUResult = (data1 < (u_int32_t)idex[1].SignExtImm) ? 1 : 0;
-            exe_count++;
-            break;
-
-        case SB:
-		case SH:
-            temp = Memory[(idex[1].inst.rs + idex[1].SignExtImm) / 4];
-            temp = temp & 0xFFFFFF00;
-            temp = (idex[1].inst.rt & 0x000000FF) | temp;
-            Memory[(idex[1].inst.rs + idex[1].SignExtImm) / 4] = temp;
-            break;
-
-        case SC:
-            temp = idex[1].inst.rs + idex[1].SignExtImm;
-            exmem[0].ALUResult = idex[1].inst.rt;
-            Memory[temp / 4] = exmem[0].ALUResult;
-            exmem[0].inst.rt = 1;
-            break;
-
-        case SW:
-            exmem[0].ALUResult = data2;
-            exmem[0].temp = data1 + idex[1].SignExtImm;
-            exe_count++;
-            break;
-
-        default:
-            break;
-    }
+	// J 타입 명령어
+	else if (idex[1].ctr.Branch==1) {
+		BranchPrediction(opcode, data1, data2);
+	}
 }
 
 void BranchPrediction(u_int32_t opcode, u_int32_t data1, u_int32_t data2){
@@ -437,8 +340,9 @@ void BranchPrediction(u_int32_t opcode, u_int32_t data1, u_int32_t data2){
 }
 
 void BranchTaken() {
-	u_int32_t b = pcBranch();
-	PC = idex[1].PC + b + 4;
+	// immediate의 4배수 + pc + 4를 PC로 함
+	PC = idex[1].PC + 4 + (idex[1].immediate << 2);
+	
 	//flush
 	memset(&ifid[0],0,sizeof(IFID));
 	memset(&idex[0],0,sizeof(IDEX));		
@@ -447,58 +351,45 @@ void BranchTaken() {
 }
 
 u_int8_t IF(){
-	// PC가 종료시점이면 0 반환
-	if (PC == 0xFFFFFFFF) return 0;
-	else {
-		// instruction을 다루기 쉽게 Memory[PC/4]로부터 바이너리 통째로 가져옴
-		ifid[0].inst.instruction = iMem[(PC)/4];
-		printf("\t[IF]\n\t\t[IM] PC: 0x%0X -> 0x%08X\n", PC, ifid[0].inst.instruction);
-	}
+	// instruction을 다루기 쉽게 Memory[PC/4]로부터 바이너리 통째로 가져옴
+	ifid[0].inst.instruction = iMem[(PC)/4];
+	printf("\t[IF]\n\t\t[IM] PC: 0x%0X -> 0x%08X\n", PC, ifid[0].inst.instruction);
 
 	// ifid pc는 나중에 업데이트됨 (중복 방지)
 	ifid[0].PC = PC;
+
 	// Update PC
 	PC = PC + 4;
 
-	return 1;
+	return 0;
 }
 
 u_int8_t ID(){
-	u_int32_t ret = 1;
-	u_int32_t opcode;
-
 	printf("\t[ID]\n");
 	// Instruction을 유기적으로 구분하는 함수
 	parseInstruction();
 
+	// 16비트짜리 offset으로 변환
+	idex[0].immediate = signExtend(ifid[1].inst.instruction);
 
-	// sign extend
-	u_int32_t imm = ifid[1].inst.instruction;
-	idex[0].SignExtImm = signExtend(imm);
-
-	opcode = idex[0].inst.opcode;
-
-	// Update latch
+	// IFID 레지스터의 출력값을 IDEX 레지스터의 입력으로 초기화
 	idex[0].inst.instruction = ifid[1].inst.instruction;
 	idex[0].PC = ifid[1].PC;
 
-    processjAddress(opcode);
-	processControl(opcode);
+	// OPCODE에 따라 Control값 반환
+	processControl(idex[0].inst.opcode);
 
-	return ret;
+	return 0;
 }
 
 u_int8_t EX(){
 	printf("\t[EX]\n");
 
-	u_int32_t data1,data2;
-
+	// rs, rt 레지스터 번호로 각각 레지스터 데이터 추출
 	idex[0].data1 = R[idex[0].inst.rs];
     idex[0].data2 = R[idex[0].inst.rt];
-    
-	idex[1].ZeroExtImm = (idex[1].inst.instruction & 0x0000FFFF);
 
-	// data forwarding/bypass
+	// Data forwarding/bypass
 	if((idex[1].inst.rs != 0) && (idex[1].inst.rs == exmem[0].WriteReg) && (exmem[0].ctr.RegWrite)) {
 		printf("\t\tFORWARDING! Rs Changed to EXMEM.ALUResult\n");
 		idex[1].data1  = exmem[0].ALUResult;
@@ -524,24 +415,11 @@ u_int8_t EX(){
 		}
 	}
 
-	data1 = idex[1].data1;
-	data2 = idex[1].data2;
-
 	// RegDst가 true일 경우 R 명령어, ALUSrc가 True일 경우 I 명령어, Branch가 True일 경우 BEQ 또는 BNE로 규정함
-	if(idex[1].ctr.RegDst == 1){
-        ALU_R(idex[1].inst.func,data1,data2);
-	} else if (idex[1].ctr.ALUSrc==1){
-        ALU_I(idex[1].inst.opcode,data1,data2);
-	} else if (idex[1].ctr.Branch==1){
-        BranchPrediction(idex[1].inst.opcode,data1,data2);
-    }
+	processALU();
 
 	// RegDst에 따라 WriteRegister를 다르게 설정함
-	if(idex[1].ctr.RegDst == 1){
-		exmem[0].WriteReg = idex[1].inst.rd;
-	} else {
-		exmem[0].WriteReg = idex[1].inst.rt;
-	}
+	exmem[0].WriteReg = (idex[1].ctr.RegDst == 1) ? idex[1].inst.rd : idex[1].inst.rt;
 
 	printf("\t\t");
 	// 각 명령어에 따라 출력값을 다르게 설정
@@ -558,10 +436,10 @@ u_int8_t EX(){
 	exmem[0].inst = idex[1].inst;
     exmem[0].PC = idex[1].PC;
 	exmem[0].ctr = idex[1].ctr;
-	exmem[0].data1 = data1;
-	exmem[0].data2 = data2;
+	exmem[0].data1 = idex[1].data1;
+	exmem[0].data2 = idex[1].data2;
 
-	return 1;
+	return 0;
 }
 
 u_int8_t MEM(){
@@ -589,7 +467,7 @@ u_int8_t MEM(){
 	memwb[0].WriteReg = exmem[1].WriteReg;
 	memwb[0].ReadData = exmem[1].ReadData;
 
-	return 1;
+	return 0;
 }
 
 u_int8_t WB(){
@@ -610,5 +488,5 @@ u_int8_t WB(){
 		}
 		reg_count++;
 	}
-	return 1;
+	return 0;
 }
