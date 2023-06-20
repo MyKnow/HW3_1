@@ -149,6 +149,14 @@ IDEX idex[2];
 EXMEM exmem[2];
 MEMWB memwb[2];
 
+// Branch History Table (BHT) Entry
+typedef struct {
+    int prediction; // Prediction for the branch
+} BHTEntry;
+
+// Branch Target Buffer (BTB)
+u_int8_t BTB[iMemSize];
+
 
 // 이진 파일에서 데이터를 한 줄씩(32비트) 읽은 다음 메모리 배열에 저장하는 함수
 void readMipsBinary(FILE *file);
